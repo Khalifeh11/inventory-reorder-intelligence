@@ -1,14 +1,15 @@
 # Atlas — Inventory Reorder Intelligence PoC
 
 Proof-of-concept for the Phase 2 initiative in the Atlas Paints & Tools AI roadmap:
-**automated reorder recommendations** driven by statistical forecasting, with optional
-LLM-generated plain-language explanations.
+**automated reorder recommendations** driven by statistical forecasting, with an optional
+LLM layer that writes a weekly triage briefing and per-SKU plain-language explanations.
 
 Designed to match Atlas's real-world constraints:
 
 - **Runs fully on-prem** — no cloud dependency. SQLite + Python only.
 - **No API integration required** — reads from a SQL snapshot of the ERP.
-- **Offline-capable** — the LLM explanation layer falls back to a deterministic template when the Anthropic API is unavailable.
+- **Offline-capable** — the LLM layer falls back to a deterministic template when the Anthropic API is unavailable.
+- **Grounded AI** — every figure in LLM output is checked against the engine's numbers; ungrounded output is rejected and the template is used instead.
 - **Statistical, not ML** — moving average + multiplicative seasonality + classical reorder-point formula. Transparent to a non-technical GM.
 
 ---
@@ -43,7 +44,7 @@ poc/
 │   ├── data_gen.py                Synthetic ERP SQLite generator
 │   ├── forecasting.py             Moving avg + multiplicative seasonality
 │   ├── reorder.py                 ROP + safety stock + recommendation
-│   └── explain.py                 LLM (Anthropic) explanation + template fallback
+│   └── explain.py                 LLM weekly briefing + per-SKU explanation, grounding guard, template fallback
 ├── notebooks/
 │   ├── 01_methodology.ipynb       Walk through data, forecast, reorder, MAPE
 │   └── 01_methodology_executed.ipynb   Same notebook, pre-executed with outputs
@@ -73,9 +74,10 @@ poc/
                          ▼                                  ▼
                  ┌──────────────┐                   ┌──────────────────┐
                  │  Streamlit   │◀──── optional ───▶│  Anthropic LLM   │
-                 │  dashboard   │                   │  (explanations)  │
+                 │  dashboard   │                   │ briefing + expl. │
                  └──────────────┘                   └──────────────────┘
-                                                    Falls back to local
+                                                    Grounding-checked;
+                                                    falls back to local
                                                     template if offline.
 ```
 
@@ -96,14 +98,19 @@ poc/
 
 Full numbers in `notebooks/01_methodology.ipynb`.
 
-## LLM explanation layer
+## LLM layer
 
-Every reorder recommendation gets a 2–3 sentence plain-language explanation. Two paths:
+Two jobs, both on top of the engine's numbers:
 
-- **LLM path** (when `ANTHROPIC_API_KEY` is set): calls `claude-haiku-4-5` with a structured prompt containing only the numbers the reorder engine produced. The system prompt explicitly forbids inventing new numbers — governance posture aligned with Module 12.
-- **Template path** (default, offline): deterministic rendering of the same underlying numbers. No surprise behavior; fully reproducible.
+- **Weekly briefing** (`summarize_week`) — an analytical Monday-morning briefing over the *full* reorder batch: triage (act-now high-risk vs. defer low-risk), supplier consolidation (multiple flagged SKUs sharing a supplier → one PO), and budget sequencing. This is synthesis the deterministic engine can't do, not a per-row restatement. Shown at the top of the Dashboard tab.
+- **Per-SKU explanation** (`explain`) — a 2–3 sentence plain-language "why" for a single recommendation, in the drilldown.
 
-The Streamlit UI shows which path produced each explanation (`llm` vs. `template`).
+Each has two paths:
+
+- **LLM path** (when `ANTHROPIC_API_KEY` is set): calls `claude-haiku-4-5` with a structured payload containing only engine-produced numbers.
+- **Template path** (default, offline): deterministic rendering of the same numbers. Fully reproducible.
+
+**Grounding guard.** Before any LLM output is shown, `numbers_are_grounded()` parses every figure in it and matches it (with rounding tolerance) against the values supplied to the model. If a figure can't be traced, the LLM output is rejected and the template is returned — so "the LLM cannot invent numbers" is enforced, not just instructed. The UI labels which path produced each output (`llm` vs. `template`).
 
 ## Not included / out of scope
 

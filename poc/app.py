@@ -15,7 +15,7 @@ import pandas as pd
 import streamlit as st
 
 from src.data_gen import DB_PATH, generate
-from src.explain import explain
+from src.explain import explain, summarize_week
 from src.forecasting import backtest_sku, forecast_sku
 from src.reorder import recommend, recommend_all
 
@@ -50,13 +50,22 @@ def _products(_conn) -> pd.DataFrame:
 
 @st.cache_data
 def _recommendations(_conn, as_of_iso: str, service_level: float, review_period: int, lead_buffer: float) -> pd.DataFrame:
-    return recommend_all(
+    recs = recommend_all(
         _conn,
         as_of=pd.Timestamp(as_of_iso).date(),
         service_level=service_level,
         review_period_days=review_period,
         lead_time_buffer_pct=lead_buffer,
     )
+    recs.attrs["as_of"] = as_of_iso
+    return recs
+
+
+@st.cache_data(show_spinner="Generating weekly briefing…")
+def _briefing(_conn, as_of_iso: str, service_level: float, review_period: int, lead_buffer: float,
+              weekly_budget: int, prefer_llm: bool) -> tuple[str, str]:
+    recs = _recommendations(_conn, as_of_iso, service_level, review_period, lead_buffer)
+    return summarize_week(recs, weekly_budget=weekly_budget or None, prefer_llm=prefer_llm)
 
 
 def _sidebar_controls() -> dict:
@@ -71,7 +80,8 @@ def _sidebar_controls() -> dict:
         )
         review_period = st.slider("Review period (days)", 7, 30, 14)
         lead_buffer = st.slider("Lead time buffer (%)", 0, 50, 0, step=5) / 100.0
-        prefer_llm = st.checkbox("Use LLM explanations (requires ANTHROPIC_API_KEY)", value=True)
+        weekly_budget = st.number_input("Weekly PO budget ($, 0 = none)", min_value=0, value=0, step=1000)
+        prefer_llm = st.checkbox("Use LLM (briefing + explanations; requires ANTHROPIC_API_KEY)", value=True)
         st.divider()
         st.caption(
             "Atlas Paints & Tools — Inventory Reorder Intelligence PoC. "
@@ -82,11 +92,26 @@ def _sidebar_controls() -> dict:
         "service_level": service_level,
         "review_period": review_period,
         "lead_buffer": lead_buffer,
+        "weekly_budget": weekly_budget,
         "prefer_llm": prefer_llm,
     }
 
 
 def _tab_dashboard(conn, params, recs: pd.DataFrame) -> None:
+    st.subheader("This week's procurement briefing")
+    brief, brief_src = _briefing(
+        conn, str(params["as_of"]), params["service_level"], params["review_period"],
+        params["lead_buffer"], int(params["weekly_budget"]), params["prefer_llm"],
+    )
+    with st.container(border=True):
+        st.markdown(brief)
+        caption = (
+            "AI-generated, numeric-grounding checked — every figure traces to the engine."
+            if brief_src == "llm"
+            else "Deterministic template (offline / no API key) — same numbers, no AI call."
+        )
+        st.caption(f"Briefing source: `{brief_src}` · {caption}")
+
     st.subheader("Overview")
     col1, col2, col3, col4 = st.columns(4)
     total_skus = len(recs)

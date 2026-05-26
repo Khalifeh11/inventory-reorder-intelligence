@@ -343,6 +343,7 @@ def s09_business_objective(slide):
         slide, Inches(0.6), Inches(1.2), Inches(6.3), Inches(5.8),
         [
             "Every Monday, GM + procurement open a local dashboard.",
+            "AI briefing up top: which few orders truly matter now, what to defer, where to consolidate by supplier.",
             "SKUs to reorder this week — ranked by stockout risk and PO value.",
             "Why each SKU — plain-language 2–3 sentence explanation.",
             "Suggested order qty, expected arrival date, total PO value.",
@@ -377,7 +378,7 @@ def s10_in_scope(slide):
             "Weekly reorder recommendations for active paint + hardware SKUs (~200–500, subject to S2 velocity analysis; ERP Stock master holds 18,533 records incl. raw materials / packaging / discontinued).",
             "Forecast horizon = supplier lead time + review period (typically 7–75 days per SKU).",
             "Human sign-off UI: GM / procurement lead reviews and approves recommendations before any PO is sent.",
-            "Plain-language 'why' explanation per recommendation (LLM-generated, governed; offline template fallback).",
+            "Weekly AI briefing (triage + supplier consolidation) + plain-language 'why' per recommendation (LLM-generated, grounding-checked; offline template fallback).",
             "Backtest MAPE + stockout-days tracking dashboard for continuous improvement.",
             "Runs on the existing on-prem server — no cloud dependency; LAN-only browser access.",
         ],
@@ -401,7 +402,7 @@ def s11_out_of_scope(slide):
 
 def s12_ai_approach(slide):
     _add_header_bar(slide, "Appropriate AI Approach",
-                    "Statistical forecasting + classical ROP + light (bounded) LLM layer")
+                    "Statistical forecasting + classical ROP + bounded LLM layer (weekly briefing + explanations)")
     _bulleted(
         slide, Inches(0.6), Inches(1.2), Inches(6.2), Inches(5.8),
         [
@@ -415,8 +416,8 @@ def s12_ai_approach(slide):
             "the noisier the demand or the longer the wait, the more buffer you hold.",
             "Defaults: service level 95% (z ≈ 1.645), review period 14 days.",
             "accept stockout on 1 review cycle in 20; revisit each SKU every 2 weeks.",
-            "LLM layer (Claude Haiku) restates engine numbers — does not invent values.",
-            "same numbers, plain language; falls back to template when offline.",
+            "LLM layer (Claude Haiku): weekly triage briefing + per-SKU 'why'.",
+            "synthesises act-now / defer / consolidate; a grounding check rejects any invented figure → template fallback.",
         ],
         indent_levels=[0, 1, 0, 1, 0, 1, 0, 1, 0, 1, 0, 1],
         title="The approach",
@@ -432,8 +433,10 @@ def s12_ai_approach(slide):
         "is over-scoped: Atlas has no team to maintain a production LLM pipeline, "
         "connectivity is unreliable, and the GM's question pattern is narrow "
         "('what do I order this week?') — a dashboard answers it directly.\n\n"
-        "• The light LLM layer adds genuine value (explainability for non-technical "
-        "users) without creating an operational dependency Atlas cannot support.",
+        "• The bounded LLM layer adds genuine value — it triages the weekly batch "
+        "(which orders matter, what to defer, where to consolidate by supplier) and "
+        "explains each call in plain language — without creating an operational "
+        "dependency Atlas cannot support. A grounding check keeps it from inventing figures.",
         title_size=13,
     )
 
@@ -505,6 +508,7 @@ def s14_tech_success(slide):
         ["Service-level compliance", "actual fill-rate vs. configured SL per segment", "≥ 95% on top-80% SKUs"],
         ["Pipeline runtime (weekly)", "end-to-end: extract → forecast → reorder → UI refresh", "< 10 minutes on on-prem server"],
         ["LLM fallback coverage", "% of recommendations with an explanation (llm OR template)", "100%"],
+        ["LLM numeric-grounding pass", "% AI outputs whose every figure traces to the engine (else auto-fallback)", "100%"],
     ]
     _add_table(slide, Inches(0.4), Inches(1.3), Inches(12.5), Inches(5.6), data)
 
@@ -560,8 +564,8 @@ def s17_data_flow(slide):
         "      ▼\n"
         "Reorder engine      ─── Reorder point + buffer (ROP + safety stock)\n"
         "      │\n"
-        "      ├─────────▶  LLM (Claude Haiku)    optional, cloud — explanation text only\n"
-        "      │◀─────────   OR offline template  deterministic fallback, bit-for-bit reproducible\n"
+        "      ├─────────▶  LLM (Claude Haiku)    optional, cloud — weekly briefing + per-SKU explanation\n"
+        "      │◀─────────   OR offline template  deterministic fallback; grounding check guards every figure\n"
         "      ▼\n"
         "Streamlit UI  (LAN-only)   Dashboard · SKU Drilldown · What-if     1–3 concurrent users\n"
         "      │\n"
@@ -607,8 +611,8 @@ def s18_tech_arch(slide):
         "                        ▼\n"
         "              GM + Procurement browsers\n"
         "\n"
-        "OPTIONAL  ·  Python service  ── HTTPS ──▶  Anthropic API   (explanations only)\n"
-        "             falls back to deterministic template whenever unreachable"
+        "OPTIONAL  ·  Python service  ── HTTPS ──▶  Anthropic API   (weekly briefing + explanations)\n"
+        "             grounding-checked; falls back to deterministic template whenever unreachable"
     )
     _mono_block(slide, Inches(0.4), Inches(1.45), Inches(12.5), Inches(4.3), arch, size=10)
     _bulleted(
@@ -743,7 +747,7 @@ def s24_risk_ethics(slide):
         ["R5. FX / import volatility shifts lead times", "High", "Med",
          "Lead-time buffer % is a tunable UI parameter; monthly re-fit"],
         ["R6. LLM hallucinates a number", "Low", "Med",
-         "System prompt forbids new numbers; source labeled in UI; template is bit-for-bit deterministic"],
+         "Automated grounding check rejects any ungrounded figure → auto-fallback to deterministic template; source labeled in UI"],
     ]
     _add_table(slide, Inches(0.3), Inches(1.25), Inches(12.7), Inches(3.8), data)
     _add_box(
@@ -752,7 +756,7 @@ def s24_risk_ethics(slide):
         "✓ Human-in-the-loop — system recommends, human places POs     "
         "✓ No PII — product + supplier data only     "
         "✓ Audit log — every rec + decision stored weekly\n"
-        "✓ LLM bounded — only restates engine numbers; cannot invent values     "
+        "✓ LLM bounded — enforced grounding check; ungrounded output auto-falls back to template     "
         "✓ Source-labelled output — 'llm' vs 'template' shown per explanation     "
         "✓ Opt-out — LLM path is optional, fully offline mode is first-class",
         title_size=13,

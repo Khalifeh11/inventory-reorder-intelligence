@@ -14,7 +14,7 @@
 
 ## 0:30–1:00  Approach in 30 seconds
 
-> "The approach is deliberately simple. For each SKU, we learn its normal monthly rhythm from ten years of history, project it over the supplier lead time, and tell the GM to order when stock drops below what he'll sell during the wait plus a buffer — the noisier the demand or the longer the wait, the bigger the buffer. No ML; a classical reorder-point formula. A small LLM layer adds plain-language explanations with an offline fallback, so the system still works when the internet drops. Everything runs on Atlas's on-prem server. No cloud."
+> "The approach is deliberately simple. For each SKU, we learn its normal monthly rhythm from ten years of history, project it over the supplier lead time, and tell the GM to order when stock drops below what he'll sell during the wait plus a buffer — the noisier the demand or the longer the wait, the bigger the buffer. No ML; a classical reorder-point formula. On top of that, a bounded LLM layer does the analyst's job — it writes a weekly briefing that triages the batch, telling the GM which few orders actually matter, what to defer, and where to consolidate POs by supplier, plus a plain-language 'why' on each one. It's grounding-checked so it can't invent a number, and it falls back to an offline template, so the system still works when the internet drops. Everything runs on Atlas's on-prem server. No cloud."
 
 [Show: the Data Flow diagram from the proposal (Slide 13 of the PPTX) or the technical-overview architecture box]
 
@@ -26,11 +26,13 @@
 
 ### Dashboard tab (45 seconds)
 
-> "This is what the GM and procurement would open every Monday morning. Four KPIs at the top — sixty SKUs tracked, thirteen flagged for reorder this week, a few high-stockout-risk items, roughly forty-four thousand dollars of recommended purchase-order value."
+> "This is what the GM and procurement would open every Monday morning. At the very top is the AI briefing — instead of reading a thirteen-row table, the GM gets a few sentences: the three high-risk items to order today and why, the low-risk items safe to defer a week, and where several flagged SKUs share a supplier so they can be combined into one PO. If you set a weekly budget, it tells you what to prioritise when the orders exceed it. Crucially, every figure in that briefing is grounding-checked against the engine — if the model ever produced a number the engine didn't, the system rejects it and shows a deterministic template instead. The caption tells you which path produced the text."
 >
-> "The table below is the ranked queue — red dots are high risk, then medium, then low. Sorted by risk first, PO value second — so the GM knows which four or five calls to prioritize."
+> "Below the briefing, four KPIs — sixty SKUs tracked, thirteen flagged for reorder this week, a few high-stockout-risk items, roughly forty-four thousand dollars of recommended purchase-order value."
+>
+> "Then the ranked queue — red dots are high risk, then medium, then low. Sorted by risk first, PO value second — the same priorities the briefing called out, in table form."
 
-[Scroll through the reorder queue; hover over one high-risk row]
+[Show the briefing panel at the top, then scroll through the reorder queue; hover over one high-risk row]
 
 ### SKU Drilldown (45 seconds)
 
@@ -62,7 +64,7 @@
 
 ## 4:00–5:00  Governance + next steps (1 minute)
 
-> "Governance-wise, this is aligned with Module 12: human-in-the-loop on every PO, LLM output bounded to restating engine numbers, every recommendation and decision logged, and monthly review of overrides as a drift signal. No PII is used — only product and supplier data."
+> "Governance-wise, this is aligned with Module 12: human-in-the-loop on every PO, LLM output bounded by an enforced grounding check that rejects any invented figure and falls back to a template, every recommendation and decision logged, and monthly review of overrides as a drift signal. No PII is used — only product and supplier data."
 
 [Show: the Governance slide or the Technical Overview limitations section]
 
