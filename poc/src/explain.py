@@ -122,24 +122,38 @@ planning engine already computed. Write a short markdown briefing with these sec
 **Safe to defer** — low-risk items that crossed the reorder point but still have cover.
 If a weekly budget is given and the total exceeds it, say so and prioritise the high-risk items.
 
-Rules: Use ONLY numbers present in the JSON. Never invent or compute new figures. Be decisive and
-brief — a busy GM should grasp the week in 20 seconds. Refer to items by SKU code and name."""
+Rules: Use ONLY numbers present in the JSON. Never invent or compute new figures — in particular,
+do NOT add up individual item values yourself. When suggesting a combined PO for a supplier, cite
+the supplier's provided `po_value` from `consolidate_by_supplier`; do not sum the items. Be decisive
+and brief — a busy GM should grasp the week in 20 seconds. Refer to items by SKU code and name."""
 
 # Small calendar/cycle integers (days, weeks, review cycles) are linguistic, not
 # fabricated data, so they are always allowed. Money values and quantities are
 # large and specific — those must trace to the engine.
 _GROUNDING_SMALL_INT_MAX = 31
 
-_NUM_RE = re.compile(r"-?\$?\s*\d[\d,]*\.?\d*")
+# Match standalone figures only — not digits embedded in identifiers (SKU codes
+# like "H0037") or unit descriptors ("12V", "20L"). The \w boundaries on both
+# sides keep "$4,400" and "95%" while ignoring the "37" inside "H0037".
+_NUM_RE = re.compile(r"(?<!\w)\$?\d[\d,]*(?:\.\d+)?(?!\w)")
 
 
 def _collect_numbers(obj) -> set[float]:
-    """Recursively gather every numeric value in a payload."""
+    """Recursively gather every numeric value in a payload.
+
+    Also pulls figures out of string values (e.g. the as_of date "2026-03-31"
+    contributes 2026/3/31) so that legitimately restating a value the engine
+    put in the payload — most importantly the date in the briefing header —
+    counts as grounded. Without this, the year in any date the model writes
+    would trip the guard and force a fallback to the template.
+    """
     nums: set[float] = set()
     if isinstance(obj, bool):
         return nums
     if isinstance(obj, (int, float)):
         nums.add(float(obj))
+    elif isinstance(obj, str):
+        nums |= set(_parse_numbers(obj))
     elif isinstance(obj, dict):
         for v in obj.values():
             nums |= _collect_numbers(v)
@@ -317,8 +331,19 @@ def summarize_week(
 if __name__ == "__main__":
     import sqlite3
     from datetime import date
+    from pathlib import Path
 
     from .reorder import DB_PATH, recommend, recommend_all
+
+    # Match the Streamlit app: load ANTHROPIC_API_KEY from poc/.env so this
+    # smoke-test exercises the real LLM path instead of silently falling back
+    # to the template. No-op if python-dotenv or .env is missing.
+    try:
+        from dotenv import load_dotenv
+
+        load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+    except ImportError:
+        pass
 
     conn = sqlite3.connect(DB_PATH)
     as_of = date(2026, 3, 31)

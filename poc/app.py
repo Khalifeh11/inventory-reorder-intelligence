@@ -6,9 +6,23 @@ Run locally:
 
 from __future__ import annotations
 
+import os
 import sqlite3
 from datetime import date, timedelta
 from pathlib import Path
+
+# Load ANTHROPIC_API_KEY (and any other vars) from a local .env file, if present.
+# Optional: the app still runs without python-dotenv or a .env — it just falls
+# back to the non-LLM path when ANTHROPIC_API_KEY is unset. We record whether
+# dotenv was importable so the sidebar can warn when the LLM path can't work
+# (e.g. launched under the wrong interpreter — see the venv note in README).
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(Path(__file__).parent / ".env")
+    _DOTENV_AVAILABLE = True
+except ImportError:
+    _DOTENV_AVAILABLE = False
 
 import altair as alt
 import pandas as pd
@@ -61,11 +75,22 @@ def _recommendations(_conn, as_of_iso: str, service_level: float, review_period:
     return recs
 
 
-@st.cache_data(show_spinner="Generating weekly briefing…")
-def _briefing(_conn, as_of_iso: str, service_level: float, review_period: int, lead_buffer: float,
+def _briefing(conn, as_of_iso: str, service_level: float, review_period: int, lead_buffer: float,
               weekly_budget: int, prefer_llm: bool) -> tuple[str, str]:
-    recs = _recommendations(_conn, as_of_iso, service_level, review_period, lead_buffer)
-    return summarize_week(recs, weekly_budget=weekly_budget or None, prefer_llm=prefer_llm)
+    # Manual session-scoped cache (not @st.cache_data) so a one-off `template`
+    # fallback — e.g. a transient API hiccup or a single ungrounded generation —
+    # never gets cached and stuck. We cache only successful `llm` briefings; a
+    # fallback is returned for this run but recomputed on the next rerun.
+    key = (as_of_iso, service_level, review_period, lead_buffer, weekly_budget, prefer_llm)
+    cache = st.session_state.setdefault("_briefing_cache", {})
+    if key in cache:
+        return cache[key]
+    recs = _recommendations(conn, as_of_iso, service_level, review_period, lead_buffer)
+    with st.spinner("Generating weekly briefing…"):
+        result = summarize_week(recs, weekly_budget=weekly_budget or None, prefer_llm=prefer_llm)
+    if result[1] == "llm" or not prefer_llm:
+        cache[key] = result
+    return result
 
 
 def _sidebar_controls() -> dict:
@@ -82,6 +107,18 @@ def _sidebar_controls() -> dict:
         lead_buffer = st.slider("Lead time buffer (%)", 0, 50, 0, step=5) / 100.0
         weekly_budget = st.number_input("Weekly PO budget ($, 0 = none)", min_value=0, value=0, step=1000)
         prefer_llm = st.checkbox("Use LLM (briefing + explanations; requires ANTHROPIC_API_KEY)", value=True)
+        if prefer_llm:
+            if not _DOTENV_AVAILABLE:
+                st.warning(
+                    "`python-dotenv` isn't installed in the running interpreter, so `.env` "
+                    "wasn't loaded — the app will fall back to the offline template. "
+                    "Launch with `.venv/bin/streamlit run app.py` from inside `poc/`."
+                )
+            elif not os.environ.get("ANTHROPIC_API_KEY"):
+                st.warning(
+                    "ANTHROPIC_API_KEY is not set. Add it to `poc/.env` and restart — "
+                    "until then the briefing uses the offline template."
+                )
         st.divider()
         st.caption(
             "Atlas Paints & Tools — Inventory Reorder Intelligence PoC. "
