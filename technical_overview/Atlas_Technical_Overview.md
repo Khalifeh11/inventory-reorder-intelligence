@@ -3,6 +3,8 @@
 **Client:** Atlas Paints & Tools (Lebanon) · **Initiative:** Phase 2, Use Case B
 **Author:** Karim Khalifeh · **Date:** April 2026 · **Program:** ZAKA Certified AI Consultant
 
+**Code:** https://github.com/Khalifeh11/inventory-reorder-intelligence · **Demo video:** https://www.loom.com/share/2bda04d902a24bfaafb3012acc627d61
+
 ---
 
 *This document accompanies the proposal PPTX and is intended for the implementation team. The proposal itself is the right artifact for GM / procurement review.*
