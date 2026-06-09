@@ -235,7 +235,18 @@ def _tab_drilldown(conn, params, products: pd.DataFrame, recs: pd.DataFrame) -> 
             f"(~${rec.currency_value:,.0f}), risk: {rec.stockout_risk.upper()}"
         )
     else:
-        st.success(f"No action required. Days of cover: {rec.days_of_cover:.0f}. Risk: {rec.stockout_risk}.")
+        # A SKU can be "no new order" yet still high-risk on on-hand alone when an
+        # open PO covers it. Use a warning (not green) in that case so the box never
+        # reads as a contradictory "all clear" next to "Risk: high".
+        box = st.warning if rec.stockout_risk == "high" else st.success
+        if rec.open_po_qty > 0:
+            box(
+                f"No new order needed — {rec.open_po_qty} units already on order "
+                f"(inventory position {rec.on_hand + rec.open_po_qty} vs reorder point {rec.reorder_point:.0f}). "
+                f"On-hand {rec.on_hand} = {rec.days_of_cover:.0f} days of cover; risk: {rec.stockout_risk.upper()}."
+            )
+        else:
+            box(f"No action required. Days of cover: {rec.days_of_cover:.0f}. Risk: {rec.stockout_risk}.")
 
     text, source = explain(rec, prefer_llm=params["prefer_llm"])
     with st.container(border=True):
@@ -254,17 +265,36 @@ def _tab_drilldown(conn, params, products: pd.DataFrame, recs: pd.DataFrame) -> 
         daily["month"] = daily["sale_date"].dt.to_period("M").dt.to_timestamp()
         monthly = daily.groupby("month", as_index=False)["quantity"].sum()
 
-        # Project forecast 3 months forward
-        horizon_months = 3
+        # Show only a recent trailing window of actuals. The full back-catalogue spans
+        # years, which compresses the forecast into an unreadable sliver at the right
+        # edge. ~18 months of context keeps the 6-month forecast a meaningful share of
+        # the x-axis while still showing the recent trend and last year's seasonality.
+        history_months = 18
+        as_of_month = pd.Timestamp(params["as_of"]).to_period("M").to_timestamp()
+        window_start = as_of_month - pd.DateOffset(months=history_months - 1)
+        monthly = monthly[(monthly["month"] >= window_start) & (monthly["month"] <= as_of_month)].copy()
+        monthly["kind"] = "actual"
+
+        # Project the forecast forward from the month after the last actual.
+        horizon_months = 6
         future_rows = []
-        cursor = pd.Timestamp(params["as_of"]).to_period("M").to_timestamp()
+        if not monthly.empty:
+            last_actual = monthly.iloc[-1]
+            # Seed the forecast series with the last actual point so the dashed line
+            # connects to history instead of floating detached with a visible gap.
+            future_rows.append(
+                {"month": last_actual["month"], "quantity": last_actual["quantity"], "kind": "forecast"}
+            )
+            cursor = last_actual["month"] + pd.DateOffset(months=1)
+        else:
+            cursor = as_of_month + pd.DateOffset(months=1)
         for i in range(horizon_months):
             month_start = cursor + pd.DateOffset(months=i)
             days_in_month = (month_start + pd.offsets.MonthEnd(0)).day
             fc = forecast_sku(conn, int(sku.sku_id), month_start.date(), horizon_days=days_in_month)
             future_rows.append({"month": month_start, "quantity": fc.expected_demand_total, "kind": "forecast"})
-        monthly["kind"] = "actual"
-        chart_df = pd.concat([monthly.assign(kind="actual"), pd.DataFrame(future_rows)], ignore_index=True)
+
+        chart_df = pd.concat([monthly, pd.DataFrame(future_rows)], ignore_index=True)
 
         chart = (
             alt.Chart(chart_df)

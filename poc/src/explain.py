@@ -20,12 +20,22 @@ from .reorder import ReorderRecommendation
 
 SYSTEM_PROMPT = """You explain inventory reorder recommendations in plain business English
 for a procurement manager at a paint/hardware wholesaler in Lebanon. Write 2-3 short
-sentences. Do NOT invent numbers — only use values explicitly provided. Be concrete
-about the risk, the reason (lead time, seasonality, or both), and the recommended action."""
+sentences. Do NOT invent numbers — only use values explicitly provided. All monetary
+values are in US dollars: always write money with a `$` prefix and never use any other
+currency (no LBP, no £/€). Be concrete about the risk, the reason (lead time,
+seasonality, or both), and the recommended action."""
 
 
 def _template_explanation(rec: ReorderRecommendation) -> str:
     if not rec.should_reorder:
+        if rec.open_po_qty > 0:
+            position = rec.on_hand + rec.open_po_qty
+            return (
+                f"No new order needed. On-hand is {rec.on_hand} units, but {rec.open_po_qty} are already "
+                f"on order — an inventory position of {position} units, above the reorder point of "
+                f"{rec.reorder_point:.0f}. Note: on-hand alone covers only ~{rec.days_of_cover:.0f} days "
+                f"at {rec.avg_daily_demand:.1f}/day, so the inbound PO is what keeps this SKU covered."
+            )
         return (
             f"No action needed now. On-hand of {rec.on_hand} units covers ~{rec.days_of_cover:.0f} days "
             f"at expected demand ({rec.avg_daily_demand:.1f}/day), above the reorder point of "
@@ -124,8 +134,10 @@ If a weekly budget is given and the total exceeds it, say so and prioritise the 
 
 Rules: Use ONLY numbers present in the JSON. Never invent or compute new figures — in particular,
 do NOT add up individual item values yourself. When suggesting a combined PO for a supplier, cite
-the supplier's provided `po_value` from `consolidate_by_supplier`; do not sum the items. Be decisive
-and brief — a busy GM should grasp the week in 20 seconds. Refer to items by SKU code and name."""
+the supplier's provided `po_value` from `consolidate_by_supplier`; do not sum the items. All monetary
+values are in US dollars: always write money with a `$` prefix and never use any other currency
+(no LBP, no £/€). Be decisive and brief — a busy GM should grasp the week in 20 seconds. Refer to
+items by SKU code and name."""
 
 # Small calendar/cycle integers (days, weeks, review cycles) are linguistic, not
 # fabricated data, so they are always allowed. Money values and quantities are
@@ -210,15 +222,26 @@ def _build_payload(recs: pd.DataFrame, weekly_budget: Optional[float]) -> dict:
             for r in cols
         ]
 
-    by_supplier = (
-        queue.groupby("supplier")
-        .agg(skus=("sku_code", "count"), value=("currency_value", "sum"))
-        .reset_index()
-        .sort_values("value", ascending=False)
-    )
+    high_items = items(high, 6)
+    defer_items = items(low, 5)
+
+    # Consolidation advises combining the SKUs the briefing actually lists, so we
+    # aggregate over the shown items only — not the full flagged queue. This makes
+    # the combined-PO value equal the exact sum of the per-item values the model
+    # sees, so when the model writes "combine into one PO for $X" the grounding
+    # guard treats $X as traceable (it is — a sum of figures we provided) instead
+    # of rejecting a correct figure as invented and forcing a template fallback.
+    shown_by_supplier: dict[str, dict] = {}
+    for it in high_items + defer_items:
+        agg = shown_by_supplier.setdefault(it["supplier"], {"skus": 0, "po_value": 0})
+        agg["skus"] += 1
+        agg["po_value"] += it["po_value"]
     consolidate = [
-        {"supplier": r["supplier"], "skus": int(r["skus"]), "po_value": int(round(r["value"]))}
-        for r in by_supplier[by_supplier["skus"] >= 2].to_dict("records")
+        {"supplier": sup, "skus": agg["skus"], "po_value": agg["po_value"]}
+        for sup, agg in sorted(
+            shown_by_supplier.items(), key=lambda kv: kv[1]["po_value"], reverse=True
+        )
+        if agg["skus"] >= 2
     ]
 
     return {
@@ -230,9 +253,9 @@ def _build_payload(recs: pd.DataFrame, weekly_budget: Optional[float]) -> dict:
         "high_risk_po_value": int(round(high["currency_value"].sum())) if len(high) else 0,
         "low_risk_count": int(len(low)),
         "weekly_budget": int(weekly_budget) if weekly_budget else None,
-        "high_risk_items": items(high, 6),
+        "high_risk_items": high_items,
         "consolidate_by_supplier": consolidate,
-        "defer_items": items(low, 5),
+        "defer_items": defer_items,
     }
 
 
