@@ -9,7 +9,7 @@
 
 ## Solution in one paragraph
 
-Atlas's procurement is reactive — SKUs are only reordered after a stockout, and hardware imports take ~2 months to arrive. This solution reads Atlas's existing ERP history, forecasts per-SKU demand over each supplier's lead time, and applies a classical reorder-point + safety-stock formula to flag which SKUs need to be ordered this week. On top of the engine, a bounded LLM layer writes a weekly procurement briefing that *triages* the batch (act-now / defer / consolidate by supplier, within any set budget) and a per-SKU plain-language explanation — LLM-generated when online, deterministic template otherwise, with every AI figure checked against the engine before display. The entire system runs on Atlas's on-prem server with no cloud dependency, matching the company's reliability and budget constraints.
+Atlas's procurement is reactive — SKUs are only reordered after a stockout, and hardware imports take ~2 months to arrive. This solution reads Atlas's existing ERP history, forecasts per-SKU demand over each supplier's lead time, and applies a classical reorder-point + safety-stock formula to flag which SKUs need to be ordered this week. On top of the engine, a bounded LLM layer writes a weekly procurement briefing that *triages* the batch (act-now / defer / consolidate by supplier, within any set budget) and a per-SKU plain-language explanation — LLM-generated when online, deterministic template otherwise. The briefing is the load-bearing AI output and is gated by a numeric-grounding guard: every figure it emits is traced back to the engine before display, or the output is rejected. The entire system runs on Atlas's on-prem server with no cloud dependency, matching the company's reliability and budget constraints.
 
 ## Inputs / outputs
 
@@ -67,12 +67,12 @@ Two functions, both calling `claude-haiku-4-5` with a structured payload of engi
 - `explain(rec)` — a 2–3 sentence "why" for a single recommendation.
 - `summarize_week(recs, weekly_budget)` — an analytical weekly briefing over the **full** reorder batch: triage (act-now high-risk vs. defer low-risk), supplier consolidation (multiple flagged SKUs sharing a supplier → one PO), and budget sequencing. This is synthesis the deterministic engine cannot do, not a per-row restatement.
 
-Both are gated by a **grounding guard** (`numbers_are_grounded`): every numeric token in the model's output is parsed and matched (with rounding tolerance) against the set of figures supplied to the model. If any figure cannot be traced, the LLM output is rejected and the deterministic template is returned instead — so "the LLM cannot invent numbers" is an enforced invariant, not a prompt request. Both paths fall back to template when `ANTHROPIC_API_KEY` is unset or the network is down; the UI labels each output's source.
+The weekly briefing is gated by a **grounding guard** (`numbers_are_grounded`): every numeric token in the model's output is parsed and matched (with rounding tolerance) against the set of figures supplied to the model. If any figure cannot be traced, the LLM output is rejected and the deterministic template is returned instead — so "the LLM cannot invent numbers" is an enforced invariant on the briefing, not a prompt request. (Small calendar integers ≤31 — days, review cycles — are treated as linguistic and always allowed; only specific money values and quantities must trace to the engine.) The per-SKU `explain()` output relies on the same numbers-only prompt but is not run through the guard, since it restates a single recommendation's own figures rather than synthesising across the batch — promoting it through the same guard is a straightforward hardening step for implementation. Both functions fall back to the template when `ANTHROPIC_API_KEY` is unset or the network is down; the UI labels each output's source (`llm` vs. `template`).
 
 **4. Streamlit UI (`app.py`)**
 Three tabs:
 - **Dashboard** — weekly AI briefing (triage / consolidation) at the top, then KPIs, reorder queue, risk distribution
-- **SKU Drilldown** — per-SKU 10-year chart + 3-month forecast + full recommendation + explanation
+- **SKU Drilldown** — per-SKU monthly sales chart (18-month trailing window) + 6-month forward forecast + full recommendation + explanation + 12-month backtest (MAPE)
 - **What-if** — service level, review period, lead-time buffer sensitivity
 
 ## How to run the PoC
@@ -84,7 +84,7 @@ python3 -m src.data_gen           # generate synthetic ERP
 streamlit run app.py              # open http://localhost:8501
 ```
 
-Optional: `export ANTHROPIC_API_KEY=sk-ant-...` before launching to enable LLM explanations.
+Optional, to enable the LLM path: put `ANTHROPIC_API_KEY=sk-ant-...` in `poc/.env` (auto-loaded via `python-dotenv`) or export it before launching. Launch with the project interpreter (e.g. `.venv/bin/streamlit run app.py` from inside `poc/`) so `.env` is loaded — otherwise the app runs but silently falls back to the offline template, which the sidebar will flag.
 
 ## Limitations
 
