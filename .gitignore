@@ -19,3 +19,8 @@ env/
 # Internal working notes — not for the public repo
 plan.md
 demo/walkthrough_script.md
+
+# Internal build scaffolding — generates the rendered docs, not shipped
+proposal/build_pdf.py
+proposal/build_pptx.py
+technical_overview/build_docx.py
