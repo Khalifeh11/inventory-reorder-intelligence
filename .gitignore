@@ -15,3 +15,7 @@ env/
 
 # Local secrets
 .env
+
+# Internal working notes — not for the public repo
+plan.md
+demo/walkthrough_script.md
